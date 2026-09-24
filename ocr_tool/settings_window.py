@@ -14,15 +14,10 @@ from PySide6.QtWidgets import (
 )
 
 from .model_client import OpenAICompatClient
+from .qt_support import describe, keep_alive
 from .settings import Settings
 
 TEST_PROMPT = "连接测试：请只回复两个字「正常」。"
-
-_RUNNING_TESTS: set["_ConnectionTest"] = set()
-
-
-def _describe(exc: BaseException) -> str:
-    return str(exc).strip() or type(exc).__name__
 
 
 class _ConnectionTest(QThread):
@@ -40,8 +35,8 @@ class _ConnectionTest(QThread):
                 text = "".join(itertools.islice(stream, 40)).strip()
             finally:
                 stream.close()
-        except Exception as exc:
-            self.failed.emit(_describe(exc))
+        except BaseException as exc:
+            self.failed.emit(describe(exc))
             return
         if not text:
             self.failed.emit("模型返回了空内容，请检查接口地址与模型名")
@@ -114,10 +109,9 @@ class SettingsWindow(QDialog):
         self._test_button.setEnabled(False)
 
         worker = _ConnectionTest(client)
-        _RUNNING_TESTS.add(worker)
+        keep_alive(worker)
         worker.succeeded.connect(self._show_success)
         worker.failed.connect(self._show_failure)
-        worker.finished.connect(lambda: _RUNNING_TESTS.discard(worker))
         worker.finished.connect(self._on_test_finished)
         self._thread = worker
         worker.start()
