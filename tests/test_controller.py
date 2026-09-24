@@ -1,4 +1,4 @@
-from ocr_tool.controller import AppController
+from ocr_tool.controller import Action, AppController
 from ocr_tool.prompt_builder import RECOGNIZE_INSTRUCTION
 
 
@@ -41,3 +41,26 @@ def test_edited_text_replaces_the_recognized_text():
     controller.set_text("你好，世界！")
 
     assert controller.text == "你好，世界！"
+
+
+def test_perform_processes_the_given_text():
+    client = FakeModelClient(["译", "文"])
+    controller = AppController(client)
+
+    chunks = list(controller.perform(Action.TRANSLATE, "编辑后的文本"))
+
+    assert chunks == ["译", "文"]
+    instruction = client.instructions[-1]
+    assert "编辑后的文本" in instruction
+    assert "翻译" in instruction
+
+
+def test_perform_can_run_repeatedly_with_different_actions():
+    client = FakeModelClient(["答"])
+    controller = AppController(client)
+
+    list(controller.perform(Action.SUMMARIZE, "一段文字"))
+    list(controller.perform(Action.CONVERT_TABLE, "一段文字"))
+
+    assert "概括" in client.instructions[-2]
+    assert "表格" in client.instructions[-1]
