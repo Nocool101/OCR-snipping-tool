@@ -1,7 +1,7 @@
 from functools import partial
 
-from PySide6.QtCore import QBuffer, QIODevice, Qt, QTimer
-from PySide6.QtGui import QGuiApplication, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtCore import QTimer
+from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtWidgets import QApplication, QDialog, QMenu, QSystemTrayIcon
 
 from . import autostart
@@ -9,37 +9,13 @@ from .capture import grab_desktop
 from .controller import AppController
 from .history import History, Recognition
 from .hotkey_manager import HotkeyManager
+from .icon import app_icon
 from .model_client import OpenAICompatClient
 from .overlay import CaptureOverlay
-from .qt_support import describe
+from .qt_support import describe, to_png
 from .result_window import ResultWindow
 from .settings import SettingsStore
 from .settings_window import SettingsWindow
-
-
-def _make_icon() -> QIcon:
-    pixmap = QPixmap(64, 64)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(Qt.GlobalColor.darkCyan)
-    painter.drawRoundedRect(4, 4, 56, 56, 14, 14)
-    font = painter.font()
-    font.setPointSize(26)
-    font.setBold(True)
-    painter.setFont(font)
-    painter.setPen(Qt.GlobalColor.white)
-    painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "文")
-    painter.end()
-    return QIcon(pixmap)
-
-
-def _to_png(image: QImage) -> bytes:
-    buffer = QBuffer()
-    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-    image.save(buffer, "PNG")
-    return bytes(buffer.data())
 
 
 class TrayApp:
@@ -52,7 +28,7 @@ class TrayApp:
         self._capture_pending = False
         self._settings_open = False
         self._hidden: list = []
-        self._icon = QSystemTrayIcon(_make_icon(), app)
+        self._icon = QSystemTrayIcon(app_icon(), app)
         self._icon.setToolTip("截图识别")
 
         self._hotkeys = HotkeyManager(app)
@@ -156,14 +132,14 @@ class TrayApp:
         if image.isNull():
             self._warn("没有截到内容，请再试一次。")
             return
-        self._start_recognition(_to_png(image))
+        self._start_recognition(to_png(image))
 
     def recognize_clipboard(self) -> None:
         image = QGuiApplication.clipboard().image()
         if image.isNull():
             self._warn("剪贴板里没有图片。先用 Win+Shift+S 截一张，再来点这里。")
             return
-        self._start_recognition(_to_png(image))
+        self._start_recognition(to_png(image))
 
     def _warn(self, message: str) -> None:
         self._icon.showMessage(

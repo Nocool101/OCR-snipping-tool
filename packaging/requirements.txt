@@ -1,0 +1,4 @@
+# 打包 exe 所需的构建依赖（运行期只需要 PySide6）。
+PySide6==6.10.2
+pyinstaller==6.22.3
+pillow==12.3.0
