@@ -1,6 +1,6 @@
 import itertools
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -13,11 +13,38 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from .hotkey import combination_from, is_valid, normalize
 from .model_client import OpenAICompatClient
 from .qt_support import describe, keep_alive
 from .settings import Settings
 
 TEST_PROMPT = "连接测试：请只回复两个字「正常」。"
+
+
+def _valid_hotkey(text: str) -> str:
+    """配置被手工改坏时回落到默认热键。"""
+    return normalize(text) if is_valid(text) else Settings().hotkey
+
+
+class HotkeyEdit(QLineEdit):
+    """**热键**输入框：点进来，直接按组合键即可记录。"""
+
+    def __init__(self, value: str, parent=None):
+        super().__init__(value, parent)
+        self.setReadOnly(True)
+        self.setPlaceholderText("点这里，然后按组合键（如 Ctrl+Alt+O）")
+
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
+            self.clearFocus()
+            return
+        if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+            self.clear()
+            return
+        combination = combination_from(event.modifiers(), key)
+        if combination is not None:
+            self.setText(combination)
 
 
 class _ConnectionTest(QThread):
@@ -55,7 +82,7 @@ class SettingsWindow(QDialog):
         self._api_key = QLineEdit(settings.api_key)
         self._api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self._model = QLineEdit(settings.model)
-        self._hotkey = QLineEdit(settings.hotkey)
+        self._hotkey = HotkeyEdit(settings.hotkey)
         self._autostart = QCheckBox("开机自启")
         self._autostart.setChecked(settings.autostart)
 
@@ -94,7 +121,7 @@ class SettingsWindow(QDialog):
             base_url=self._base_url.text().strip(),
             api_key=self._api_key.text().strip(),
             model=self._model.text().strip(),
-            hotkey=self._hotkey.text().strip() or Settings().hotkey,
+            hotkey=_valid_hotkey(self._hotkey.text()),
             autostart=self._autostart.isChecked(),
         )
 
