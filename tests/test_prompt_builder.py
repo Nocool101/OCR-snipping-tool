@@ -1,5 +1,6 @@
 from ocr_tool.prompt_builder import (
     RECOGNIZE_INSTRUCTION,
+    ask_instruction,
     convert_table_instruction,
     summarize_instruction,
     translate_instruction,
@@ -38,3 +39,16 @@ def test_convert_table_instruction_asks_for_a_markdown_table():
     assert "姓名  年龄" in instruction
     assert "Markdown" in instruction
     assert "表格" in instruction
+
+
+def test_ask_instruction_carries_both_the_question_and_the_text():
+    instruction = ask_instruction("这段代码有问题吗？", "def f(): pass")
+
+    assert "这段代码有问题吗？" in instruction
+    assert "def f(): pass" in instruction
+
+
+def test_ask_instruction_forbids_repeating_the_source_text():
+    instruction = ask_instruction("翻译它", "hello")
+
+    assert "不要重复原文" in instruction

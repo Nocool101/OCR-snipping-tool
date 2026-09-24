@@ -5,6 +5,7 @@ from PySide6.QtGui import QGuiApplication, QTextCursor
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
@@ -59,7 +60,7 @@ class ResultWindow(QWidget):
         self._editor.textChanged.connect(self._on_edited)
 
         self._answer = QTextBrowser()
-        self._answer.setPlaceholderText("翻译、总结、表格转换的答案会出现在这里")
+        self._answer.setPlaceholderText("翻译、总结、表格转换、自定义提问的答案会出现在这里")
         self._answer.setOpenExternalLinks(True)
 
         splitter = QSplitter(Qt.Orientation.Vertical)
@@ -69,6 +70,10 @@ class ResultWindow(QWidget):
         self._status = QLabel("")
         self._copy = QPushButton("复制")
         self._copy.clicked.connect(self._copy_to_clipboard)
+
+        self._question = QLineEdit()
+        self._question.setPlaceholderText("在这里输入你的问题，回车发送")
+        self._question.returnPressed.connect(self._run_ask)
 
         self._action_buttons: list[QPushButton] = []
         actions = QHBoxLayout()
@@ -84,6 +89,7 @@ class ResultWindow(QWidget):
         layout.addWidget(splitter, stretch=1)
         layout.addWidget(self._status)
         layout.addLayout(actions)
+        layout.addWidget(self._question)
 
     def start_recognition(self, image: bytes) -> None:
         if self.is_busy():
@@ -104,19 +110,40 @@ class ResultWindow(QWidget):
     def _run_action(self, action: Action) -> None:
         if self.is_busy():
             return
+        text = self._processable_text()
+        if text is None:
+            return
+        self._run(action, lambda: self._controller.perform(action, text))
+
+    def _run_ask(self) -> None:
+        if self.is_busy():
+            return
+        question = self._question.text().strip()
+        if not question:
+            self._status.setText("请先输入要问的问题")
+            return
+        text = self._processable_text()
+        if text is None:
+            return
+        self._run(
+            Action.ASK,
+            lambda: self._controller.perform(Action.ASK, text, question),
+        )
+
+    def _processable_text(self) -> str | None:
         text = self._editor.toPlainText()
         if not text.strip():
             self._status.setText("还没有可处理的文字")
-            return
+            return None
+        return text
+
+    def _run(self, action: Action, start_stream) -> None:
         self._answer.clear()
         self._answer_markdown = ""
         self._activity = action.value
         self._begin()
-        self._start_worker(
-            lambda: self._controller.perform(action, text),
-            self._append_answer,
-            self._finish_action,
-        )
+        self._start_worker(start_stream, self._append_answer, self._finish_action)
+
 
     def is_busy(self) -> bool:
         return self._worker is not None and self._worker.isRunning()
@@ -142,6 +169,7 @@ class ResultWindow(QWidget):
         for button in self._action_buttons:
             button.setEnabled(not busy)
         self._copy.setEnabled(not busy)
+        self._question.setEnabled(not busy)
 
     @staticmethod
     def _append_plain(widget, piece: str) -> None:

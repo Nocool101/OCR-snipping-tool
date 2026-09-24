@@ -1,3 +1,5 @@
+import pytest
+
 from ocr_tool.controller import Action, AppController
 from ocr_tool.prompt_builder import RECOGNIZE_INSTRUCTION
 
@@ -64,3 +66,29 @@ def test_perform_can_run_repeatedly_with_different_actions():
 
     assert "概括" in client.instructions[-2]
     assert "表格" in client.instructions[-1]
+
+
+def test_perform_ask_carries_the_question_and_the_text():
+    client = FakeModelClient(["答"])
+    controller = AppController(client)
+
+    chunks = list(controller.perform(Action.ASK, "被处理的文本", "这段代码有问题吗？"))
+
+    assert chunks == ["答"]
+    instruction = client.instructions[-1]
+    assert "这段代码有问题吗？" in instruction
+    assert "被处理的文本" in instruction
+
+
+def test_ask_is_an_action_but_not_a_button():
+    from ocr_tool.controller import ACTION_ORDER
+
+    assert Action.ASK.value == "自定义提问"
+    assert Action.ASK not in ACTION_ORDER
+
+
+def test_ask_without_a_question_is_rejected():
+    controller = AppController(FakeModelClient(["答"]))
+
+    with pytest.raises(ValueError):
+        list(controller.perform(Action.ASK, "被处理的文本"))

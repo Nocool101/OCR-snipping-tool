@@ -12,6 +12,7 @@ class Action(Enum):
     TRANSLATE = "翻译成中文"
     SUMMARIZE = "总结"
     CONVERT_TABLE = "表格转换"
+    ASK = "自定义提问"
 
 
 ACTION_ORDER = (Action.TRANSLATE, Action.SUMMARIZE, Action.CONVERT_TABLE)
@@ -47,7 +48,15 @@ class AppController:
             yield chunk
         self._text = "".join(buffer)
 
-    def perform(self, action: Action, text: str) -> Iterator[str]:
-        """对**文本**执行一个**动作**，逐块产出答案。"""
-        instruction = _ACTION_INSTRUCTIONS[action](text)
+    def perform(self, action: Action, text: str, question: str = "") -> Iterator[str]:
+        """对**文本**执行一个**动作**，逐块产出答案。
+
+        **自定义提问**必须给出问题；其余动作忽略 `question`。
+        """
+        if action is Action.ASK:
+            if not question.strip():
+                raise ValueError("自定义提问需要一个非空的问题")
+            instruction = prompt_builder.ask_instruction(question, text)
+        else:
+            instruction = _ACTION_INSTRUCTIONS[action](text)
         yield from self._client.stream(instruction)

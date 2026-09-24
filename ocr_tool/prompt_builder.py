@@ -13,6 +13,9 @@ CONVERT_TABLE_INSTRUCTION = (
     "把下面的内容整理成 Markdown 表格，只输出表格，不要添加任何解释。"
     "若原文没有可整理成表格的结构，就原样输出。"
 )
+ASK_INSTRUCTION = (
+    "根据下面的内容回答我的问题。只输出回答本身，不要重复原文，也不要添加额外说明。"
+)
 
 
 def _with_text(instruction: str, text: str) -> str:
@@ -29,3 +32,7 @@ def summarize_instruction(text: str) -> str:
 
 def convert_table_instruction(text: str) -> str:
     return _with_text(CONVERT_TABLE_INSTRUCTION, text)
+
+
+def ask_instruction(question: str, text: str) -> str:
+    return f"{ASK_INSTRUCTION}\n\n问题：{question}\n\n内容：\n{text}"
