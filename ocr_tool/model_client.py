@@ -1,11 +1,16 @@
 import base64
+import http.client
 import json
+import time
 import urllib.error
 import urllib.request
 import uuid
 from typing import Iterator, Protocol
 
 USER_AGENT = "screenshot-ocr/0.1 (OpenAI-compatible client)"
+
+DEFAULT_ATTEMPTS = 3
+DEFAULT_RETRY_DELAY = 0.4
 
 
 class ModelError(Exception):
@@ -53,16 +58,40 @@ class OpenAICompatClient:
         model: str,
         timeout: float = 60.0,
         session_id: str | None = None,
+        attempts: int = DEFAULT_ATTEMPTS,
+        retry_delay: float = DEFAULT_RETRY_DELAY,
     ):
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model = model
         self._timeout = timeout
         self._session_id = session_id or uuid.uuid4().hex
+        self._attempts = max(1, attempts)
+        self._retry_delay = max(0.0, retry_delay)
 
     def stream(self, instruction: str, image: bytes | None = None) -> Iterator[str]:
+        """逐块产出模型回复。
+
+        连接被边缘节点偶发掐断时（一次约百分之几的概率）会重试，
+        但**只在还没有产出任何文字之前**重试——已经吐字后再重试会重复输出。
+        """
         if not self._api_key:
             raise MissingApiKey("尚未配置 API Key")
+        for attempt in range(1, self._attempts + 1):
+            produced = False
+            try:
+                for chunk in self._stream_once(instruction, image):
+                    produced = True
+                    yield chunk
+                return
+            except ModelNetworkError:
+                if produced or attempt == self._attempts:
+                    raise
+                time.sleep(self._retry_delay)
+
+    def _stream_once(
+        self, instruction: str, image: bytes | None
+    ) -> Iterator[str]:
         request = self._build_request(instruction, image)
         try:
             with urllib.request.urlopen(request, timeout=self._timeout) as response:
@@ -78,6 +107,13 @@ class OpenAICompatClient:
             if isinstance(exc.reason, TimeoutError):
                 raise ModelTimeout("请求超时") from exc
             raise ModelNetworkError(f"网络错误：{exc.reason}") from exc
+        except OSError as exc:
+            # urllib 的 getresponse() 在它自己的 try 之外，服务端在返回响应前
+            # 断开时抛出的 RemoteDisconnected 不会被包成 URLError，只能在这里接住。
+            raise ModelNetworkError(f"网络错误：{exc}") from exc
+        except http.client.HTTPException as exc:
+            # BadStatusLine、IncompleteRead 等只继承 HTTPException，不是 OSError。
+            raise ModelNetworkError(f"模型服务响应异常：{exc}") from exc
 
     def _build_request(
         self, instruction: str, image: bytes | None

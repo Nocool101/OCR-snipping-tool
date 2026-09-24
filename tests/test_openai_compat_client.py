@@ -19,8 +19,13 @@ class _FakeModelServer(BaseHTTPRequestHandler):
     sse_lines = []
     delay = 0.0
     received = None
+    requests = 0
+    fail_first = False
+    fail_always = False
+    garbage = False
 
     def do_POST(self):
+        type(self).requests += 1
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length)
         type(self).received = {
@@ -30,6 +35,16 @@ class _FakeModelServer(BaseHTTPRequestHandler):
             "session": self.headers.get("x-opencode-session"),
             "body": json.loads(raw.decode("utf-8")),
         }
+        if type(self).fail_always or (
+            type(self).fail_first and type(self).requests == 1
+        ):
+            self.close_connection = True
+            return
+        if type(self).garbage:
+            self.wfile.write(b"not-http-at-all\r\n\r\n")
+            self.wfile.flush()
+            self.close_connection = True
+            return
         if type(self).delay:
             import time
 
@@ -57,6 +72,10 @@ def fake_server():
     _FakeModelServer.sse_lines = []
     _FakeModelServer.delay = 0.0
     _FakeModelServer.received = None
+    _FakeModelServer.requests = 0
+    _FakeModelServer.fail_first = False
+    _FakeModelServer.fail_always = False
+    _FakeModelServer.garbage = False
 
     server = HTTPServer(("127.0.0.1", 0), _FakeModelServer)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -222,4 +241,54 @@ def test_http_500_is_reported_as_model_error(base_url):
     client = OpenAICompatClient(base_url=base_url, api_key="sk", model="m")
 
     with pytest.raises(ModelResponseError):
+        list(client.stream("提取文字"))
+
+
+def test_retries_a_transient_network_failure_before_any_output(base_url):
+    _FakeModelServer.fail_first = True
+    _FakeModelServer.sse_lines = [
+        'data: {"choices":[{"delta":{"content":"好"}}]}',
+        "data: [DONE]",
+    ]
+    client = OpenAICompatClient(
+        base_url=base_url, api_key="sk", model="m", attempts=3, retry_delay=0.01
+    )
+
+    chunks = list(client.stream("提取文字"))
+
+    assert chunks == ["好"]
+    assert _FakeModelServer.requests == 2
+
+
+def test_gives_up_after_the_configured_attempts(base_url):
+    _FakeModelServer.fail_always = True
+    client = OpenAICompatClient(
+        base_url=base_url, api_key="sk", model="m", attempts=2, retry_delay=0.01
+    )
+
+    with pytest.raises(ModelNetworkError):
+        list(client.stream("提取文字"))
+
+    assert _FakeModelServer.requests == 2
+
+
+def test_a_single_attempt_means_no_retry(base_url):
+    _FakeModelServer.fail_always = True
+    client = OpenAICompatClient(
+        base_url=base_url, api_key="sk", model="m", attempts=1, retry_delay=0.01
+    )
+
+    with pytest.raises(ModelNetworkError):
+        list(client.stream("提取文字"))
+
+    assert _FakeModelServer.requests == 1
+
+
+def test_a_non_http_response_is_classified_as_network_failure(base_url):
+    _FakeModelServer.garbage = True
+    client = OpenAICompatClient(
+        base_url=base_url, api_key="sk", model="m", attempts=1
+    )
+
+    with pytest.raises(ModelNetworkError):
         list(client.stream("提取文字"))
