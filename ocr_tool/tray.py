@@ -46,6 +46,7 @@ class TrayApp:
         self._windows: list[ResultWindow] = []
         self._overlay: CaptureOverlay | None = None
         self._capture_pending = False
+        self._settings_open = False
         self._hidden: list = []
         self._icon = QSystemTrayIcon(_make_icon(), app)
         self._icon.setToolTip("截图识别")
@@ -84,12 +85,18 @@ class TrayApp:
             self.open_settings()
 
     def open_settings(self) -> None:
-        window = SettingsWindow(self._store.load())
-        if window.exec() == QDialog.DialogCode.Accepted:
-            settings = window.settings()
-            self._store.save(settings)
-            autostart.apply(settings.autostart)
-            self._apply_hotkey()
+        if self._settings_open:
+            return
+        self._settings_open = True
+        try:
+            window = SettingsWindow(self._store.load())
+            if window.exec() == QDialog.DialogCode.Accepted:
+                settings = window.settings()
+                self._store.save(settings)
+                autostart.apply(settings.autostart)
+                self._apply_hotkey()
+        finally:
+            self._settings_open = False
 
     def _apply_hotkey(self) -> bool:
         hotkey = self._store.load().hotkey
@@ -159,6 +166,10 @@ class TrayApp:
 
     def _start_recognition(self, png: bytes) -> None:
         settings = self._store.load()
+        if not settings.api_key:
+            self._warn("还没有配置 API Key，先打开设置填好模型信息。")
+            self.open_settings()
+            return
         client = OpenAICompatClient(
             base_url=settings.base_url,
             api_key=settings.api_key,

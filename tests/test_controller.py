@@ -1,6 +1,11 @@
 import pytest
 
 from ocr_tool.controller import Action, AppController
+from ocr_tool.model_client import (
+    MissingApiKey,
+    ModelAuthError,
+    ModelNetworkError,
+)
 from ocr_tool.prompt_builder import RECOGNIZE_INSTRUCTION
 
 
@@ -92,3 +97,41 @@ def test_ask_without_a_question_is_rejected():
 
     with pytest.raises(ValueError):
         list(controller.perform(Action.ASK, "被处理的文本"))
+
+
+class FailingModelClient:
+    def __init__(self, error):
+        self._error = error
+
+    def stream(self, instruction, image=None):
+        raise self._error
+        yield
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        MissingApiKey("尚未配置 API Key"),
+        ModelNetworkError("网络错误：连接被重置"),
+        ModelAuthError("鉴权失败（HTTP 401）：Invalid API key"),
+    ],
+    ids=["missing-key", "network", "model-error"],
+)
+def test_failures_pass_through_the_controller_unchanged(error):
+    controller = AppController(FailingModelClient(error))
+
+    with pytest.raises(type(error)) as raised:
+        list(controller.recognize(b"png-bytes"))
+
+    assert str(raised.value) == str(error), "分类与原因都应原样传上去"
+
+
+def test_a_failed_recognition_leaves_the_previous_text_alone():
+    controller = AppController(FakeModelClient(["旧"]))
+    list(controller.recognize(b"png-bytes"))
+    controller = AppController(FailingModelClient(ModelNetworkError("网络错误")))
+
+    with pytest.raises(ModelNetworkError):
+        list(controller.recognize(b"png-bytes"))
+
+    assert controller.text == ""

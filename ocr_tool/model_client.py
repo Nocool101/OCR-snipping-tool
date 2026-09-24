@@ -37,6 +37,10 @@ class ModelNetworkError(ModelError):
     """网络不通。"""
 
 
+class ModelTruncated(ModelError):
+    """流在结束标记之前就断了。不是网络不通，而是协议层不完整。"""
+
+
 def _image_media_type(image: bytes) -> str:
     if image.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
@@ -84,7 +88,7 @@ class OpenAICompatClient:
                     produced = True
                     yield chunk
                 return
-            except ModelNetworkError:
+            except (ModelNetworkError, ModelTruncated):
                 if produced or attempt == self._attempts:
                     raise
                 time.sleep(self._retry_delay)
@@ -150,6 +154,11 @@ class OpenAICompatClient:
 
     @staticmethod
     def _parse_events(response) -> Iterator[str]:
+        """逐行解析 SSE。
+
+        OpenAI 兼容协议以 `data: [DONE]` 收尾；没见到它就读到了 EOF，
+        说明响应被干净地截断了（分块传输的异常截断会另外抛 IncompleteRead）。
+        """
         for raw_line in response:
             line = raw_line.decode("utf-8", errors="replace").strip()
             if not line.startswith("data:"):
@@ -165,6 +174,9 @@ class OpenAICompatClient:
                 content = choice.get("delta", {}).get("content")
                 if content:
                     yield content
+        raise ModelTruncated(
+            "模型响应不完整（没收到结束标记），请检查接口地址与模型名是否正确"
+        )
 
     @staticmethod
     def _error_detail(exc: urllib.error.HTTPError) -> str:

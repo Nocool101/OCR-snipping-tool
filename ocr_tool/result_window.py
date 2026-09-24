@@ -70,6 +70,11 @@ class ResultWindow(QWidget):
         self._status = QLabel("")
         self._copy = QPushButton("复制")
         self._copy.clicked.connect(self._copy_to_clipboard)
+        self._retry = QPushButton("重试")
+        self._retry.setEnabled(False)
+        self._retry.setVisible(False)
+        self._retry.clicked.connect(self.retry)
+        self._last_attempt = None
 
         self._question = QLineEdit()
         self._question.setPlaceholderText("在这里输入你的问题，回车发送")
@@ -78,6 +83,7 @@ class ResultWindow(QWidget):
         self._action_buttons: list[QPushButton] = []
         actions = QHBoxLayout()
         actions.addWidget(self._copy)
+        actions.addWidget(self._retry)
         for action in ACTION_ORDER:
             button = QPushButton(action.value)
             button.clicked.connect(partial(self._run_action, action))
@@ -94,6 +100,7 @@ class ResultWindow(QWidget):
     def start_recognition(self, image: bytes) -> None:
         if self.is_busy():
             return
+        self._last_attempt = lambda: self.start_recognition(image)
         self._filling_text = True
         self._editor.clear()
         self._answer.clear()
@@ -106,6 +113,12 @@ class ResultWindow(QWidget):
             self._append_text,
             self._finish_recognition,
         )
+
+    def retry(self) -> None:
+        """重跑上一次失败的操作（同一张截图，或同一段文本与问题）。"""
+        if self.is_busy() or self._last_attempt is None:
+            return
+        self._last_attempt()
 
     def _run_action(self, action: Action) -> None:
         if self.is_busy():
@@ -138,12 +151,12 @@ class ResultWindow(QWidget):
         return text
 
     def _run(self, action: Action, start_stream) -> None:
+        self._last_attempt = lambda: self._run(action, start_stream)
         self._answer.clear()
         self._answer_markdown = ""
         self._activity = action.value
         self._begin()
         self._start_worker(start_stream, self._append_answer, self._finish_action)
-
 
     def is_busy(self) -> bool:
         return self._worker is not None and self._worker.isRunning()
@@ -159,6 +172,8 @@ class ResultWindow(QWidget):
 
     def _begin(self) -> None:
         self._status.setText(f"{self._activity}中…")
+        self._retry.setVisible(False)
+        self._retry.setEnabled(False)
         self._set_busy(True)
 
     def _end(self) -> None:
@@ -204,6 +219,8 @@ class ResultWindow(QWidget):
             self._controller.set_text(self._editor.toPlainText())
         self._set_busy(False)
         self._status.setText(f"{self._activity}失败：{message}")
+        self._retry.setVisible(True)
+        self._retry.setEnabled(True)
 
     def _on_edited(self) -> None:
         if self._filling_text:
