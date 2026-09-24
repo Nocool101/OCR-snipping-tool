@@ -39,7 +39,7 @@
 | 字段 | 说明 | 默认 |
 | --- | --- | --- |
 | `base_url` | 模型接口地址（OpenAI 兼容） | `https://api.openai.com/v1` |
-| `api_key` | API Key | 空 |
+| `api_key_enc` | API Key（Windows DPAPI 加密后的密文；请在设置窗口填写，不要手改） | 空 |
 | `model` | 模型名 | 空 |
 | `hotkey` | 全局热键 | `Ctrl+Alt+O` |
 | `autostart` | 开机自启 | 关 |
@@ -86,6 +86,7 @@ ocr_tool/
   result_window.py   结果窗口
   settings_window.py 设置窗口
   settings.py        配置读写与默认值
+  secret_store.py    API Key 的 DPAPI 加密存储
   history.py         内存历史（最新在前，上限 20）
   hotkey.py          热键解析 / 规范化 / 校验
   hotkey_manager.py  全局热键注册（RegisterHotKey）
@@ -104,7 +105,7 @@ packaging/           PyInstaller 配置与构建依赖
 ## 隐私
 
 - 截图会被发送到你在设置里配置的**模型**服务，仅此一处；本工具没有自己的服务器。
-- API Key 以明文保存在本机 `%APPDATA%\screenshot-ocr\settings.json`，介意的话请自行保护该目录。
+- API Key 用 Windows DPAPI 加密后保存在本机 `%APPDATA%\screenshot-ocr\settings.json`（`api_key_enc` 字段），密文绑定当前 Windows 账户，换账户或换机器解不开。
 - **历史记录只存在内存里**，退出即清空，不落盘。
 
 ## 已知限制

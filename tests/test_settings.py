@@ -1,9 +1,18 @@
+import json
+
+import pytest
+
+from ocr_tool import secret_store
 from ocr_tool.settings import (
     DEFAULT_FONT_SIZE,
     MAX_FONT_SIZE,
     MIN_FONT_SIZE,
     Settings,
     SettingsStore,
+)
+
+needs_dpapi = pytest.mark.skipif(
+    not secret_store.available(), reason="DPAPI 仅在 Windows 上可用"
 )
 
 
@@ -84,3 +93,64 @@ def test_corrupt_file_falls_back_to_defaults(tmp_path):
     assert settings.hotkey == "Ctrl+Alt+O"
     assert settings.api_key == ""
     assert settings.model == ""
+
+
+@needs_dpapi
+def test_api_key_is_encrypted_on_save(tmp_path):
+    path = tmp_path / "settings.json"
+
+    SettingsStore(path).save(Settings(api_key="sk-secret"))
+
+    raw = path.read_text(encoding="utf-8")
+    payload = json.loads(raw)
+    assert "api_key" not in payload
+    assert payload["api_key_enc"]
+    assert "sk-secret" not in raw
+
+
+@needs_dpapi
+def test_encrypted_key_round_trips(tmp_path):
+    store = SettingsStore(tmp_path / "settings.json")
+
+    store.save(Settings(api_key="sk-secret"))
+
+    assert store.load().api_key == "sk-secret"
+
+
+@needs_dpapi
+def test_undecryptable_key_degrades_to_unconfigured(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps({"api_key_enc": "bm90LWEtcmVhbC1kcGFwaS1ibG9i"}),
+        encoding="utf-8",
+    )
+
+    assert SettingsStore(path).load().api_key == ""
+
+
+@needs_dpapi
+def test_legacy_plaintext_key_is_migrated_on_load(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps({"api_key": "sk-old", "model": "m"}), encoding="utf-8"
+    )
+
+    loaded = SettingsStore(path).load()
+
+    assert loaded.api_key == "sk-old"
+    assert loaded.model == "m"
+    raw = path.read_text(encoding="utf-8")
+    assert "api_key" not in json.loads(raw)
+    assert "sk-old" not in raw
+
+
+@needs_dpapi
+def test_migration_does_not_rewrite_an_already_encrypted_file(tmp_path):
+    path = tmp_path / "settings.json"
+    store = SettingsStore(path)
+    store.save(Settings(api_key="sk-secret"))
+    before = path.read_text(encoding="utf-8")
+
+    store.load()
+
+    assert path.read_text(encoding="utf-8") == before
