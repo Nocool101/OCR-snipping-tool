@@ -4,6 +4,8 @@ import urllib.error
 import urllib.request
 from typing import Iterator, Protocol
 
+USER_AGENT = "screenshot-ocr/0.1 (OpenAI-compatible client)"
+
 
 class ModelError(Exception):
     """与模型通信失败。"""
@@ -96,6 +98,7 @@ class OpenAICompatClient:
                 "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
                 "Accept": "text/event-stream",
+                "User-Agent": USER_AGENT,
             },
             method="POST",
         )

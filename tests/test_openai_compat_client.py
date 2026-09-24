@@ -26,6 +26,7 @@ class _FakeModelServer(BaseHTTPRequestHandler):
         type(self).received = {
             "path": self.path,
             "authorization": self.headers.get("Authorization"),
+            "user_agent": self.headers.get("User-Agent"),
             "body": json.loads(raw.decode("utf-8")),
         }
         if type(self).delay:
@@ -134,6 +135,20 @@ def test_slow_server_is_reported_as_timeout(base_url):
 
     with pytest.raises(ModelTimeout):
         list(client.stream("提取文字"))
+
+
+def test_sends_a_non_default_user_agent(base_url):
+    _FakeModelServer.sse_lines = [
+        'data: {"choices":[{"delta":{"content":"x"}}]}',
+        "data: [DONE]",
+    ]
+    client = OpenAICompatClient(base_url=base_url, api_key="sk", model="m")
+
+    list(client.stream("提取文字"))
+
+    user_agent = _FakeModelServer.received["user_agent"]
+    assert user_agent, "必须发送 User-Agent"
+    assert "Python-urllib" not in user_agent, user_agent
 
 
 def test_sends_image_as_base64_data_url(base_url):
