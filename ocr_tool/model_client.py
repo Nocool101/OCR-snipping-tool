@@ -2,6 +2,7 @@ import base64
 import json
 import urllib.error
 import urllib.request
+import uuid
 from typing import Iterator, Protocol
 
 USER_AGENT = "screenshot-ocr/0.1 (OpenAI-compatible client)"
@@ -51,11 +52,13 @@ class OpenAICompatClient:
         api_key: str,
         model: str,
         timeout: float = 60.0,
+        session_id: str | None = None,
     ):
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model = model
         self._timeout = timeout
+        self._session_id = session_id or uuid.uuid4().hex
 
     def stream(self, instruction: str, image: bytes | None = None) -> Iterator[str]:
         if not self._api_key:
@@ -99,6 +102,7 @@ class OpenAICompatClient:
                 "Content-Type": "application/json",
                 "Accept": "text/event-stream",
                 "User-Agent": USER_AGENT,
+                "x-opencode-session": self._session_id,
             },
             method="POST",
         )
