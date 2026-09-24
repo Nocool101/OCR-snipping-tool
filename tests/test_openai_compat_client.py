@@ -1,6 +1,7 @@
 import json
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -25,6 +26,9 @@ class _FakeModelServer(BaseHTTPRequestHandler):
     fail_always = False
     garbage = False
     first_lines = None
+    stall_before_first_line = 0.0
+    stall_every_request = False
+    stall_after_first_line = 0.0
 
     def do_POST(self):
         type(self).requests += 1
@@ -51,15 +55,22 @@ class _FakeModelServer(BaseHTTPRequestHandler):
         if type(self).first_lines is not None and type(self).requests == 1:
             lines = type(self).first_lines
         if type(self).delay:
-            import time
-
             time.sleep(type(self).delay)
         self.send_response(type(self).status)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
-        for line in lines:
-            self.wfile.write((line + "\n").encode("utf-8"))
-        self.wfile.flush()
+        try:
+            if type(self).stall_before_first_line and (
+                type(self).stall_every_request or type(self).requests == 1
+            ):
+                time.sleep(type(self).stall_before_first_line)
+            for index, line in enumerate(lines):
+                self.wfile.write((line + "\n").encode("utf-8"))
+                self.wfile.flush()
+                if index == 0 and type(self).stall_after_first_line:
+                    time.sleep(type(self).stall_after_first_line)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def log_message(self, *args):
         pass
@@ -82,8 +93,11 @@ def fake_server():
     _FakeModelServer.fail_always = False
     _FakeModelServer.garbage = False
     _FakeModelServer.first_lines = None
+    _FakeModelServer.stall_before_first_line = 0.0
+    _FakeModelServer.stall_every_request = False
+    _FakeModelServer.stall_after_first_line = 0.0
 
-    server = HTTPServer(("127.0.0.1", 0), _FakeModelServer)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeModelServer)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -327,3 +341,88 @@ def test_truncation_before_any_output_is_retried(base_url):
 
     assert list(client.stream("提取文字")) == ["好"]
     assert _FakeModelServer.requests == 2
+
+
+def test_a_stalled_first_token_switches_to_a_fresh_attempt(base_url):
+    _FakeModelServer.stall_before_first_line = 0.5
+    _FakeModelServer.sse_lines = [
+        'data: {"choices":[{"delta":{"content":"好"}}]}',
+        "data: [DONE]",
+    ]
+    client = OpenAICompatClient(
+        base_url=base_url,
+        api_key="sk",
+        model="m",
+        timeout=30.0,
+        first_token_timeout=0.1,
+        attempts=3,
+        retry_delay=0.01,
+    )
+
+    assert list(client.stream("提取文字")) == ["好"]
+    assert _FakeModelServer.requests == 2, "首字卡住应换一次连接重试"
+
+
+def test_a_stalled_first_token_retries_only_once(base_url):
+    _FakeModelServer.stall_before_first_line = 0.5
+    _FakeModelServer.stall_every_request = True
+    client = OpenAICompatClient(
+        base_url=base_url,
+        api_key="sk",
+        model="m",
+        timeout=30.0,
+        first_token_timeout=0.1,
+        attempts=3,
+        retry_delay=0.01,
+    )
+
+    with pytest.raises(ModelTimeout):
+        list(client.stream("提取文字"))
+
+    assert _FakeModelServer.requests == 2, "首字超时只换一次，不跟着 attempts 反复重试"
+
+
+def test_a_stall_after_output_is_not_retried(base_url):
+    _FakeModelServer.sse_lines = [
+        'data: {"choices":[{"delta":{"content":"你"}}]}',
+        "data: [DONE]",
+    ]
+    _FakeModelServer.stall_after_first_line = 0.6
+    client = OpenAICompatClient(
+        base_url=base_url,
+        api_key="sk",
+        model="m",
+        timeout=0.3,
+        first_token_timeout=5.0,
+        attempts=3,
+        retry_delay=0.01,
+    )
+
+    chunks = []
+    with pytest.raises(ModelTimeout):
+        for chunk in client.stream("提取文字"):
+            chunks.append(chunk)
+
+    assert chunks == ["你"], "已经吐出的内容应仍然可见"
+    assert _FakeModelServer.requests == 1, "吐字之后再卡住不应重试（会重复输出）"
+
+
+def test_first_token_timeout_leaves_long_output_alone(base_url):
+    _FakeModelServer.stall_after_first_line = 0.5
+    _FakeModelServer.sse_lines = [
+        'data: {"choices":[{"delta":{"content":"好"}}]}',
+        'data: {"choices":[{"delta":{"content":"了"}}]}',
+        "data: [DONE]",
+    ]
+    client = OpenAICompatClient(
+        base_url=base_url,
+        api_key="sk",
+        model="m",
+        timeout=30.0,
+        first_token_timeout=0.2,
+        attempts=1,
+    )
+
+    assert list(client.stream("提取文字")) == ["好", "了"], (
+        "首字到手后超时应放宽，长回答里的停顿不算超时"
+    )

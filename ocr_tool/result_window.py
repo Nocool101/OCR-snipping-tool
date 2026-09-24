@@ -15,7 +15,8 @@ from PySide6.QtWidgets import (
 )
 
 from .controller import ACTION_ORDER, Action, AppController
-from .qt_support import describe, keep_alive
+from .qt_support import describe, keep_alive, set_point_size
+from .settings import DEFAULT_FONT_SIZE
 
 
 class _StreamWorker(QThread):
@@ -42,7 +43,7 @@ class ResultWindow(QWidget):
 
     closed = Signal(object)
 
-    def __init__(self, controller: AppController):
+    def __init__(self, controller: AppController, font_size: int = DEFAULT_FONT_SIZE):
         super().__init__()
         self._controller = controller
         self._worker: _StreamWorker | None = None
@@ -96,6 +97,13 @@ class ResultWindow(QWidget):
         layout.addWidget(self._status)
         layout.addLayout(actions)
         layout.addWidget(self._question)
+
+        self.set_font_size(font_size)
+
+    def set_font_size(self, size: int) -> None:
+        """调整**文本**与答案的字号；设置里改大小时，已开着的窗口也实时跟着变。"""
+        for widget in (self._editor, self._answer):
+            set_point_size(widget, size)
 
     def start_recognition(self, image: bytes) -> None:
         if self.is_busy():

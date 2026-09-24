@@ -11,6 +11,7 @@ USER_AGENT = "screenshot-ocr/0.1 (OpenAI-compatible client)"
 
 DEFAULT_ATTEMPTS = 3
 DEFAULT_RETRY_DELAY = 0.4
+DEFAULT_FIRST_TOKEN_TIMEOUT = 20.0
 
 
 class ModelError(Exception):
@@ -64,6 +65,7 @@ class OpenAICompatClient:
         session_id: str | None = None,
         attempts: int = DEFAULT_ATTEMPTS,
         retry_delay: float = DEFAULT_RETRY_DELAY,
+        first_token_timeout: float = DEFAULT_FIRST_TOKEN_TIMEOUT,
     ):
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
@@ -72,15 +74,19 @@ class OpenAICompatClient:
         self._session_id = session_id or uuid.uuid4().hex
         self._attempts = max(1, attempts)
         self._retry_delay = max(0.0, retry_delay)
+        self._first_token_timeout = max(0.0, first_token_timeout)
 
     def stream(self, instruction: str, image: bytes | None = None) -> Iterator[str]:
         """逐块产出模型回复。
 
         连接被边缘节点偶发掐断时（一次约百分之几的概率）会重试，
         但**只在还没有产出任何文字之前**重试——已经吐字后再重试会重复输出。
+        首个字迟迟不来（超过 `first_token_timeout`）也会断开重试**一次**：
+        那多半是这次请求恰好落在了慢节点上，换条连接常常就快了。
         """
         if not self._api_key:
             raise MissingApiKey("尚未配置 API Key")
+        timeout_retried = False
         for attempt in range(1, self._attempts + 1):
             produced = False
             try:
@@ -88,6 +94,11 @@ class OpenAICompatClient:
                     produced = True
                     yield chunk
                 return
+            except ModelTimeout:
+                if produced or timeout_retried or attempt == self._attempts:
+                    raise
+                timeout_retried = True
+                time.sleep(self._retry_delay)
             except (ModelNetworkError, ModelTruncated):
                 if produced or attempt == self._attempts:
                     raise
@@ -97,9 +108,17 @@ class OpenAICompatClient:
         self, instruction: str, image: bytes | None
     ) -> Iterator[str]:
         request = self._build_request(instruction, image)
+        # 连接与首字用更短的超时兜住卡死的节点；首字到手后再放宽到完整超时，
+        # 免得长回答被这个较短的期限误伤。
+        opening_timeout = min(self._timeout, self._first_token_timeout)
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout) as response:
-                yield from self._parse_events(response)
+            with urllib.request.urlopen(request, timeout=opening_timeout) as response:
+                first = True
+                for chunk in self._parse_events(response):
+                    if first:
+                        self._relax_timeout(response)
+                        first = False
+                    yield chunk
         except TimeoutError as exc:
             raise ModelTimeout("请求超时") from exc
         except urllib.error.HTTPError as exc:
@@ -118,6 +137,16 @@ class OpenAICompatClient:
         except http.client.HTTPException as exc:
             # BadStatusLine、IncompleteRead 等只继承 HTTPException，不是 OSError。
             raise ModelNetworkError(f"模型服务响应异常：{exc}") from exc
+
+    def _relax_timeout(self, response) -> None:
+        """首字到手后，把 socket 超时放宽到完整超时。
+
+        读的是 urllib 响应的底层 socket；换个 Python/urllib 实现拿不到它时
+        静默跳过，最坏也只是继续用较短的首字超时，不影响功能。
+        """
+        sock = getattr(getattr(getattr(response, "fp", None), "raw", None), "_sock", None)
+        if sock is not None:
+            sock.settimeout(self._timeout)
 
     def _build_request(
         self, instruction: str, image: bytes | None

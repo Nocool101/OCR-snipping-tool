@@ -6,17 +6,19 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
 )
 
 from .hotkey import combination_from, is_valid, normalize
 from .model_client import OpenAICompatClient
-from .qt_support import describe, keep_alive
-from .settings import Settings
+from .qt_support import describe, keep_alive, set_point_size
+from .settings import MAX_FONT_SIZE, MIN_FONT_SIZE, Settings
 
 TEST_PROMPT = "连接测试：请只回复两个字「正常」。"
 
@@ -72,6 +74,8 @@ class _ConnectionTest(QThread):
 
 
 class SettingsWindow(QDialog):
+    font_size_changed = Signal(int)
+
     def __init__(self, settings: Settings, parent=None):
         super().__init__(parent)
         self.setWindowTitle("设置")
@@ -83,15 +87,29 @@ class SettingsWindow(QDialog):
         self._api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self._model = QLineEdit(settings.model)
         self._hotkey = HotkeyEdit(settings.hotkey)
+        self._font_size = QSpinBox()
+        self._font_size.setRange(MIN_FONT_SIZE, MAX_FONT_SIZE)
+        self._font_size.setValue(settings.font_size)
+        self._font_size.setSuffix(" pt")
         self._autostart = QCheckBox("开机自启")
         self._autostart.setChecked(settings.autostart)
+
+        self._preview = QLabel("识别出的文字会以这个大小显示。\nThe quick brown fox 0123456789")
+        self._preview.setWordWrap(True)
+        self._preview.setFrameShape(QFrame.Shape.StyledPanel)
+        self._preview.setMinimumHeight(72)
+        self._preview.setContentsMargins(8, 6, 8, 6)
+        self._font_size.valueChanged.connect(self._on_font_size_changed)
+        self._on_font_size_changed(self._font_size.value())
 
         form = QFormLayout()
         form.addRow("接口地址", self._base_url)
         form.addRow("API Key", self._api_key)
         form.addRow("模型名", self._model)
         form.addRow("热键", self._hotkey)
+        form.addRow("文字大小", self._font_size)
         form.addRow("", self._autostart)
+        form.addRow("预览", self._preview)
 
         self._test_button = QPushButton("测试连接")
         self._test_button.clicked.connect(self._test_connection)
@@ -123,7 +141,13 @@ class SettingsWindow(QDialog):
             model=self._model.text().strip(),
             hotkey=_valid_hotkey(self._hotkey.text()),
             autostart=self._autostart.isChecked(),
+            font_size=self._font_size.value(),
         )
+
+    def _on_font_size_changed(self, size: int) -> None:
+        """改字号：预览框里的字立刻变，并让已打开的结果窗口也实时跟着变。"""
+        set_point_size(self._preview, size)
+        self.font_size_changed.emit(size)
 
     def _test_connection(self) -> None:
         client = OpenAICompatClient(

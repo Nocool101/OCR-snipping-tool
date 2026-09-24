@@ -1,7 +1,7 @@
 """Qt 的公共支撑。"""
 
 from PySide6.QtCore import QBuffer, QIODevice
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QFont, QImage
 
 _RUNNING_WORKERS: set = set()
 
@@ -12,6 +12,13 @@ def to_png(image: QImage) -> bytes:
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
     image.save(buffer, "PNG")
     return bytes(buffer.data())
+
+
+def set_point_size(widget, size: int) -> None:
+    """把控件文字的字号设成 `size` 磅（保留其字体族）。"""
+    font = QFont(widget.font())
+    font.setPointSize(size)
+    widget.setFont(font)
 
 
 def describe(exc: BaseException) -> str:

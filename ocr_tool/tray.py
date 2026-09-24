@@ -72,13 +72,23 @@ class TrayApp:
         self._settings_open = True
         try:
             window = SettingsWindow(self._store.load())
-            if window.exec() == QDialog.DialogCode.Accepted:
+            window.font_size_changed.connect(self._apply_font_size)
+            accepted = window.exec() == QDialog.DialogCode.Accepted
+            if accepted:
                 settings = window.settings()
                 self._store.save(settings)
                 autostart.apply(settings.autostart)
                 self._apply_hotkey()
+                self._apply_font_size(settings.font_size)
+            else:
+                # 取消时把实时预览过的字号退回已保存的值，别让窗口和配置不一致。
+                self._apply_font_size(self._store.load().font_size)
         finally:
             self._settings_open = False
+
+    def _apply_font_size(self, size: int) -> None:
+        for window in self._windows:
+            window.set_font_size(size)
 
     def _apply_hotkey(self) -> bool:
         hotkey = self._store.load().hotkey
@@ -152,11 +162,19 @@ class TrayApp:
             self._warn("还没有配置 API Key，先打开设置填好模型信息。")
             self.open_settings()
             return
-        window = ResultWindow(AppController(self._build_client(), self._history))
-        self._windows.append(window)
-        window.closed.connect(self._forget)
+        window = self._new_result_window()
         window.show()
         window.start_recognition(png)
+
+    def _new_result_window(self) -> ResultWindow:
+        """开一个结果窗口，用当前配置的字号；记进列表以便设置里实时调字号。"""
+        window = ResultWindow(
+            AppController(self._build_client(), self._history),
+            self._store.load().font_size,
+        )
+        self._windows.append(window)
+        window.closed.connect(self._forget)
+        return window
 
     def _build_client(self) -> OpenAICompatClient:
         settings = self._store.load()
@@ -178,9 +196,7 @@ class TrayApp:
             action.triggered.connect(partial(self._open_history_entry, entry))
 
     def _open_history_entry(self, entry: Recognition) -> None:
-        window = ResultWindow(AppController(self._build_client(), self._history))
-        self._windows.append(window)
-        window.closed.connect(self._forget)
+        window = self._new_result_window()
         window.show()
         window.show_text(entry.text)
 
