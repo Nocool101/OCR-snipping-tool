@@ -1,6 +1,7 @@
 import pytest
 
 from ocr_tool.controller import Action, AppController
+from ocr_tool.history import History
 from ocr_tool.model_client import (
     MissingApiKey,
     ModelAuthError,
@@ -135,3 +136,40 @@ def test_a_failed_recognition_leaves_the_previous_text_alone():
         list(controller.recognize(b"png-bytes"))
 
     assert controller.text == ""
+
+
+def test_each_recognition_is_remembered_newest_first():
+    controller = AppController(FakeModelClient(["一"]))
+    list(controller.recognize(b"png"))
+
+    controller = AppController(FakeModelClient(["二"]), controller.history)
+    list(controller.recognize(b"png"))
+
+    assert [entry.text for entry in controller.history.entries] == ["二", "一"]
+
+
+def test_a_shared_history_keeps_entries_across_controllers():
+    history = History()
+
+    list(AppController(FakeModelClient(["甲"]), history).recognize(b"png"))
+    list(AppController(FakeModelClient(["乙"]), history).recognize(b"png"))
+
+    assert [entry.text for entry in history.entries] == ["乙", "甲"]
+
+
+def test_history_drops_the_oldest_beyond_its_limit():
+    history = History(limit=2)
+    for text in ("一", "二", "三"):
+        list(AppController(FakeModelClient([text]), history).recognize(b"png"))
+
+    assert [entry.text for entry in history.entries] == ["三", "二"]
+
+
+def test_a_failed_recognition_is_not_remembered():
+    history = History()
+    controller = AppController(FailingModelClient(ModelNetworkError("网络错误")), history)
+
+    with pytest.raises(ModelNetworkError):
+        list(controller.recognize(b"png"))
+
+    assert history.entries == ()

@@ -114,6 +114,18 @@ class ResultWindow(QWidget):
             self._finish_recognition,
         )
 
+    def show_text(self, text: str) -> None:
+        """直接显示一条已有的**文本**（例如来自历史记录），不做识别。"""
+        self._editor.setReadOnly(False)
+        self._editor.setPlainText(text)
+        self._answer.clear()
+        self._answer_markdown = ""
+        self._last_attempt = None
+        self._retry.setVisible(False)
+        self._retry.setEnabled(False)
+        self._controller.set_text(text)
+        self._status.setText("来自历史记录")
+
     def retry(self) -> None:
         """重跑上一次失败的操作（同一张截图，或同一段文本与问题）。"""
         if self.is_busy() or self._last_attempt is None:

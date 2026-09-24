@@ -1,3 +1,5 @@
+from functools import partial
+
 from PySide6.QtCore import QBuffer, QIODevice, Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QDialog, QMenu, QSystemTrayIcon
@@ -5,6 +7,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QMenu, QSystemTrayIcon
 from . import autostart
 from .capture import grab_desktop
 from .controller import AppController
+from .history import History, Recognition
 from .hotkey_manager import HotkeyManager
 from .model_client import OpenAICompatClient
 from .overlay import CaptureOverlay
@@ -44,6 +47,7 @@ class TrayApp:
         self._app = app
         self._store = store
         self._windows: list[ResultWindow] = []
+        self._history = History()
         self._overlay: CaptureOverlay | None = None
         self._capture_pending = False
         self._settings_open = False
@@ -57,6 +61,8 @@ class TrayApp:
         menu = QMenu()
         recognize_action = menu.addAction("识别剪贴板图片")
         recognize_action.triggered.connect(self.recognize_clipboard)
+        self._history_menu = menu.addMenu("历史")
+        self._history_menu.aboutToShow.connect(self._rebuild_history)
         menu.addSeparator()
         settings_action = menu.addAction("设置")
         settings_action.triggered.connect(self.open_settings)
@@ -170,16 +176,37 @@ class TrayApp:
             self._warn("还没有配置 API Key，先打开设置填好模型信息。")
             self.open_settings()
             return
-        client = OpenAICompatClient(
-            base_url=settings.base_url,
-            api_key=settings.api_key,
-            model=settings.model,
-        )
-        window = ResultWindow(AppController(client))
+        window = ResultWindow(AppController(self._build_client(), self._history))
         self._windows.append(window)
         window.closed.connect(self._forget)
         window.show()
         window.start_recognition(png)
+
+    def _build_client(self) -> OpenAICompatClient:
+        settings = self._store.load()
+        return OpenAICompatClient(
+            base_url=settings.base_url,
+            api_key=settings.api_key,
+            model=settings.model,
+        )
+
+    def _rebuild_history(self) -> None:
+        self._history_menu.clear()
+        entries = self._history.entries
+        if not entries:
+            empty = self._history_menu.addAction("（本次运行还没有记录）")
+            empty.setEnabled(False)
+            return
+        for entry in entries:
+            action = self._history_menu.addAction(entry.label())
+            action.triggered.connect(partial(self._open_history_entry, entry))
+
+    def _open_history_entry(self, entry: Recognition) -> None:
+        window = ResultWindow(AppController(self._build_client(), self._history))
+        self._windows.append(window)
+        window.closed.connect(self._forget)
+        window.show()
+        window.show_text(entry.text)
 
     def _forget(self, window: ResultWindow) -> None:
         self._windows = [w for w in self._windows if w is not window]
