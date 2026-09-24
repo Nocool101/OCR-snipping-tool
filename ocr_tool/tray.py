@@ -34,7 +34,7 @@ class TrayApp:
 
         menu = QMenu()
         settings_action = menu.addAction("设置")
-        settings_action.triggered.connect(self._open_settings)
+        settings_action.triggered.connect(self.open_settings)
         menu.addSeparator()
         quit_action = menu.addAction("退出")
         quit_action.triggered.connect(app.quit)
@@ -56,9 +56,9 @@ class TrayApp:
 
     def _on_activated(self, reason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
-            self._open_settings()
+            self.open_settings()
 
-    def _open_settings(self) -> None:
+    def open_settings(self) -> None:
         window = SettingsWindow(self._store.load())
         if window.exec() == QDialog.DialogCode.Accepted:
             settings = window.settings()

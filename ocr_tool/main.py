@@ -16,6 +16,9 @@ def main() -> int:
     tray = TrayApp(app, store)
     tray.show()
 
+    if not store.path.exists():
+        tray.open_settings()
+
     return app.exec()
 
 
