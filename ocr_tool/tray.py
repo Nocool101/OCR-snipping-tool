@@ -41,9 +41,22 @@ class TrayApp:
 
         self._menu = menu
         self._icon.setContextMenu(menu)
+        self._icon.activated.connect(self._on_activated)
 
     def show(self) -> None:
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            raise RuntimeError("系统托盘不可用，程序无法常驻")
         self._icon.show()
+        self._icon.showMessage(
+            "截图识别",
+            "已在后台运行。右键托盘图标可打开设置（图标可能收在 ^ 折叠区）。",
+            QSystemTrayIcon.MessageIcon.Information,
+            5000,
+        )
+
+    def _on_activated(self, reason) -> None:
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._open_settings()
 
     def _open_settings(self) -> None:
         window = SettingsWindow(self._store.load())
