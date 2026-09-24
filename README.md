@@ -115,4 +115,5 @@ packaging/           PyInstaller 配置与构建依赖
 
 ## 许可
 
-本仓库暂未添加开源许可证。
+- 本软件（screenshot-ocr）以 [MIT License](LICENSE) 发布，Copyright (c) 2026 Nocool101。
+- 所使用的第三方组件及其许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)（含 PySide6 的 LGPL v3 声明）。
